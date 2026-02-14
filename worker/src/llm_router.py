@@ -36,7 +36,7 @@ class GoogleAIProvider(LLMProvider):
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
     async def generate(self, prompt: str, image_base64: Optional[str] = None) -> str:
-        model = "models/gemini-2.5-flash-preview-05-20"
+        model = "models/gemini-2.0-flash"
         url = f"{self.base_url}/{model}:generateContent?key={self.api_key}"
 
         parts = [{"text": prompt}]
