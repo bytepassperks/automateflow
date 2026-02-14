@@ -52,6 +52,22 @@ app.use('/api/templates', templateRoutes);
 app.use('/api/keys', apikeyRoutes);
 app.use('/api/webhooks', webhookRoutes);
 
+app.get('/api/screenshots/:key(*)', async (req, res) => {
+  try {
+    const { GetObjectCommand } = require('@aws-sdk/client-s3');
+    const { s3Client, BUCKET_NAME } = require('./config/storage');
+    const key = req.params.key;
+    const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key });
+    const response = await s3Client.send(command);
+    res.set('Content-Type', response.ContentType || 'image/png');
+    res.set('Cache-Control', 'public, max-age=86400');
+    response.Body.pipe(res);
+  } catch (err) {
+    console.error('Screenshot proxy error:', err.message);
+    res.status(404).json({ error: 'Screenshot not found' });
+  }
+});
+
 const frontendPath = path.join(__dirname, '../frontend-dist');
 app.use(express.static(frontendPath));
 

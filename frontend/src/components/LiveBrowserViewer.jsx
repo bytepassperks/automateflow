@@ -2,6 +2,18 @@ import { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 
 const WS_URL = import.meta.env.VITE_WS_URL || '';
+const API_URL = import.meta.env.VITE_API_URL || '';
+
+function proxyScreenshotUrl(url) {
+  if (!url) return url;
+  const bucket = 'crop-spray-uploads';
+  const idx = url.indexOf(`/${bucket}/`);
+  if (idx !== -1) {
+    const key = url.substring(idx + bucket.length + 2);
+    return `${API_URL}/api/screenshots/${key}`;
+  }
+  return url;
+}
 
 export default function LiveBrowserViewer({ jobId, screenshots = [], isRunning }) {
   const [liveScreenshots, setLiveScreenshots] = useState(screenshots);
@@ -78,7 +90,7 @@ export default function LiveBrowserViewer({ jobId, screenshots = [], isRunning }
 
       <div ref={containerRef} className="relative bg-black aspect-video">
         <img
-          src={liveScreenshots[currentIndex]}
+          src={proxyScreenshotUrl(liveScreenshots[currentIndex])}
           alt={`Screenshot ${currentIndex + 1}`}
           className="w-full h-full object-contain"
         />
