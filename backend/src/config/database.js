@@ -1,6 +1,8 @@
 const { Sequelize } = require('sequelize');
 
-const sequelize = new Sequelize(process.env.DATABASE_URL, {
+const dbUrl = (process.env.DATABASE_URL || '').replace(/\?sslmode=require$/, '');
+
+const sequelize = new Sequelize(dbUrl, {
   dialect: 'postgres',
   logging: process.env.NODE_ENV === 'development' ? console.log : false,
   pool: {
