@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3000';
+const WS_URL = import.meta.env.VITE_WS_URL || '';
 
 export default function LiveBrowserViewer({ jobId, screenshots = [], isRunning }) {
   const [liveScreenshots, setLiveScreenshots] = useState(screenshots);
