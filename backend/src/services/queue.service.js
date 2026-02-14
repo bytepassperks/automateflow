@@ -42,7 +42,6 @@ async function addJob(jobData) {
   const queue = getQueue();
   console.log(`Queuing job ${jobData.jobId} to BullMQ...`);
   const bullJob = await queue.add('automation', jobData, {
-    priority: jobData.priority || 5,
     attempts: jobData.maxRetries || 3,
     backoff: {
       type: 'exponential',
