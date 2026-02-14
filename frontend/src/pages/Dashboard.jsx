@@ -24,10 +24,10 @@ export default function Dashboard() {
           <p className="text-gray-400 mt-1">Overview of your automation activity</p>
         </div>
         <button
-          onClick={() => navigate('/jobs')}
+          onClick={() => navigate('/chat')}
           className="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-500 transition-colors"
         >
-          New Job
+          New Chat
         </button>
       </div>
 

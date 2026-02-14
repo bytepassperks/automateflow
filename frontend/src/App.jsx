@@ -1,8 +1,10 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import Layout from './components/Layout';
+import ChatLayout from './components/ChatLayout';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ChatAgent from './pages/ChatAgent';
 import Dashboard from './pages/Dashboard';
 import Jobs from './pages/Jobs';
 import JobDetail from './pages/JobDetail';
@@ -52,8 +54,11 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
       <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
+      <Route path="/" element={<ProtectedRoute><ChatLayout /></ProtectedRoute>}>
+        <Route index element={<Navigate to="/chat" replace />} />
+        <Route path="chat" element={<ChatAgent />} />
+      </Route>
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-        <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="jobs" element={<Jobs />} />
         <Route path="jobs/:id" element={<JobDetail />} />
@@ -62,7 +67,7 @@ export default function App() {
         <Route path="api-keys" element={<ApiKeys />} />
         <Route path="settings" element={<Settings />} />
       </Route>
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/chat" replace />} />
     </Routes>
   );
 }
