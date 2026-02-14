@@ -6,6 +6,18 @@ import api from '../services/api';
 import toast from 'react-hot-toast';
 
 const WS_URL = import.meta.env.VITE_WS_URL || '';
+const API_URL = import.meta.env.VITE_API_URL || '';
+
+function proxyScreenshotUrl(url) {
+  if (!url) return url;
+  const bucket = 'crop-spray-uploads';
+  const idx = url.indexOf(`/${bucket}/`);
+  if (idx !== -1) {
+    const key = url.substring(idx + bucket.length + 2);
+    return `${API_URL}/api/screenshots/${key}`;
+  }
+  return url;
+}
 
 const SUGGESTIONS = [
   'Take a screenshot of https://example.com',
@@ -534,9 +546,9 @@ function ChatBubble({ message }) {
               <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
               <span className="text-xs text-gray-500">Browser Screenshot</span>
             </div>
-            <a href={content} target="_blank" rel="noopener noreferrer">
-              <img src={content} alt="Browser" className="w-full" loading="lazy" />
-            </a>
+              <a href={proxyScreenshotUrl(content)} target="_blank" rel="noopener noreferrer">
+                <img src={proxyScreenshotUrl(content)} alt="Browser screenshot" className="w-full" loading="lazy" />
+              </a>
           </div>
         </div>
       </div>

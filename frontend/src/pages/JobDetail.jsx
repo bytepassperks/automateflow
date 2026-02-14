@@ -4,6 +4,19 @@ import JobStatusBadge from '../components/JobStatusBadge';
 import LiveBrowserViewer from '../components/LiveBrowserViewer';
 import toast from 'react-hot-toast';
 
+const API_URL = import.meta.env.VITE_API_URL || '';
+
+function proxyScreenshotUrl(url) {
+  if (!url) return url;
+  const bucket = 'crop-spray-uploads';
+  const idx = url.indexOf(`/${bucket}/`);
+  if (idx !== -1) {
+    const key = url.substring(idx + bucket.length + 2);
+    return `${API_URL}/api/screenshots/${key}`;
+  }
+  return url;
+}
+
 export default function JobDetail() {
   const { id } = useParams();
   const { data, isLoading } = useJob(id);
@@ -150,9 +163,9 @@ export default function JobDetail() {
               </h3>
               <div className="grid grid-cols-2 gap-2">
                 {job.screenshots.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                  <a key={i} href={proxyScreenshotUrl(url)} target="_blank" rel="noopener noreferrer">
                     <img
-                      src={url}
+                      src={proxyScreenshotUrl(url)}
                       alt={`Screenshot ${i + 1}`}
                       className="rounded-lg border border-gray-800 hover:border-primary-500 transition-colors"
                     />
