@@ -3,7 +3,9 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const compression = require('compression');
 const morgan = require('morgan');
+const path = require('path');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const { sequelize } = require('./models');
@@ -28,9 +30,13 @@ const io = new Server(httpServer, {
 
 app.set('io', io);
 
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
+app.use(compression());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: '*',
   credentials: true,
 }));
 app.use(morgan('combined'));
@@ -45,6 +51,13 @@ app.use('/api/jobs', jobRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/keys', apikeyRoutes);
 app.use('/api/webhooks', webhookRoutes);
+
+const frontendPath = path.join(__dirname, '../frontend-dist');
+app.use(express.static(frontendPath));
+
+app.get(/^(?!\/api|\/health|\/socket\.io).*/, (req, res) => {
+  res.sendFile(path.join(frontendPath, 'index.html'));
+});
 
 app.use((err, req, res, _next) => {
   console.error('Unhandled error:', err);
