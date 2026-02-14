@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: automateflow
+      POSTGRES_PASSWORD: automateflow_dev
+      POSTGRES_DB: automateflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U automateflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgres://automateflow:automateflow_dev@postgres:5432/automateflow
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev-jwt-secret-change-in-production
+      JWT_REFRESH_SECRET: dev-jwt-refresh-secret-change-in-production
+      WORKER_SECRET: dev-worker-secret
+      FRONTEND_URL: http://localhost:5173
+      IDRIVE_E2_ENDPOINT: ${IDRIVE_E2_ENDPOINT:-https://placeholder.e2.idrivee2.com}
+      IDRIVE_E2_ACCESS_KEY: ${IDRIVE_E2_ACCESS_KEY:-placeholder}
+      IDRIVE_E2_SECRET_KEY: ${IDRIVE_E2_SECRET_KEY:-placeholder}
+      IDRIVE_E2_BUCKET: ${IDRIVE_E2_BUCKET:-automateflow-files}
+      AWS_SES_REGION: ${AWS_SES_REGION:-us-east-1}
+      AWS_SES_ACCESS_KEY: ${AWS_SES_ACCESS_KEY:-placeholder}
+      AWS_SES_SECRET_KEY: ${AWS_SES_SECRET_KEY:-placeholder}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:3000
+      VITE_WS_URL: ws://localhost:3000
+    depends_on:
+      - backend
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379
+      BACKEND_URL: http://backend:3000
+      WORKER_SECRET: dev-worker-secret
+      GOOGLE_AI_STUDIO_KEY: ${GOOGLE_AI_STUDIO_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      HF_API_TOKEN: ${HF_API_TOKEN:-}
+      IDRIVE_E2_ENDPOINT: ${IDRIVE_E2_ENDPOINT:-https://placeholder.e2.idrivee2.com}
+      IDRIVE_E2_ACCESS_KEY: ${IDRIVE_E2_ACCESS_KEY:-placeholder}
+      IDRIVE_E2_SECRET_KEY: ${IDRIVE_E2_SECRET_KEY:-placeholder}
+      IDRIVE_E2_BUCKET: ${IDRIVE_E2_BUCKET:-automateflow-files}
+      DISPLAY: ":99"
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
