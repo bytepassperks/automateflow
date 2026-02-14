@@ -1,11 +1,29 @@
 const { Queue } = require('bullmq');
-const { createRedisClient } = require('../config/redis');
 
 let automationQueue = null;
 
+function parseRedisUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return {
+      host: parsed.hostname,
+      port: parseInt(parsed.port, 10) || 6379,
+      password: parsed.password || undefined,
+      username: parsed.username || undefined,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+    };
+  } catch (e) {
+    console.error('Failed to parse REDIS_URL:', e.message);
+    return { host: 'localhost', port: 6379, maxRetriesPerRequest: null, enableReadyCheck: false };
+  }
+}
+
 function getQueue() {
   if (!automationQueue) {
-    const connection = createRedisClient();
+    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+    const connection = parseRedisUrl(redisUrl);
+    console.log(`BullMQ connecting to Redis at ${connection.host}:${connection.port}`);
     automationQueue = new Queue('automation-jobs', {
       connection,
       defaultJobOptions: {
@@ -13,12 +31,16 @@ function getQueue() {
         removeOnFail: { count: 5000 },
       },
     });
+    automationQueue.on('error', (err) => {
+      console.error('BullMQ queue error:', err.message);
+    });
   }
   return automationQueue;
 }
 
 async function addJob(jobData) {
   const queue = getQueue();
+  console.log(`Queuing job ${jobData.jobId} to BullMQ...`);
   const bullJob = await queue.add('automation', jobData, {
     priority: jobData.priority || 5,
     attempts: jobData.maxRetries || 3,
@@ -27,6 +49,7 @@ async function addJob(jobData) {
       delay: 1000,
     },
   });
+  console.log(`Job ${jobData.jobId} queued as BullMQ job #${bullJob.id}`);
   return bullJob;
 }
 
