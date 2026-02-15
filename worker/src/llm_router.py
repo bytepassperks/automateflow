@@ -6,6 +6,16 @@ logger = logging.getLogger(__name__)
 
 
 def create_llm():
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+    if openrouter_key:
+        from browser_use import ChatOpenAI
+        logger.info("Using OpenRouter (google/gemini-2.0-flash-001) as primary LLM")
+        return ChatOpenAI(
+            model="google/gemini-2.0-flash-001",
+            api_key=openrouter_key,
+            base_url="https://openrouter.ai/api/v1",
+        )
+
     google_key = os.getenv("GOOGLE_AI_STUDIO_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
     if google_key:
         from browser_use import ChatGoogle
@@ -13,49 +23,26 @@ def create_llm():
         logger.info("Using Google Gemini (gemini-2.0-flash) as primary LLM")
         return ChatGoogle(model="gemini-2.0-flash")
 
+    raise ValueError("No LLM API key configured. Set OPENROUTER_API_KEY or GOOGLE_AI_STUDIO_KEY.")
+
+
+def create_fallback_llm():
     openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
     if openrouter_key:
         from browser_use import ChatOpenAI
-        logger.info("Using OpenRouter (qwen/qwen2.5-vl-72b-instruct) as primary LLM")
+        logger.info("Using OpenRouter (qwen/qwen2.5-vl-72b-instruct) as fallback LLM")
         return ChatOpenAI(
             model="qwen/qwen2.5-vl-72b-instruct",
             api_key=openrouter_key,
             base_url="https://openrouter.ai/api/v1",
         )
 
-    cerebras_key = os.getenv("CEREBRAS_API_KEY", "")
-    if cerebras_key:
-        from browser_use import ChatOpenAI
-        logger.info("Using Cerebras (llama-3.3-70b) as primary LLM")
-        return ChatOpenAI(
-            model="llama-3.3-70b",
-            api_key=cerebras_key,
-            base_url="https://api.cerebras.ai/v1",
-        )
-
-    raise ValueError("No LLM API key configured. Set GOOGLE_AI_STUDIO_KEY, OPENROUTER_API_KEY, or CEREBRAS_API_KEY.")
-
-
-def create_fallback_llm():
-    cerebras_key = os.getenv("CEREBRAS_API_KEY", "")
-    if cerebras_key:
-        from browser_use import ChatOpenAI
-        logger.info("Using Cerebras as fallback LLM")
-        return ChatOpenAI(
-            model="llama-3.3-70b",
-            api_key=cerebras_key,
-            base_url="https://api.cerebras.ai/v1",
-        )
-
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
-    if openrouter_key:
-        from browser_use import ChatOpenAI
-        logger.info("Using OpenRouter as fallback LLM")
-        return ChatOpenAI(
-            model="qwen/qwen2.5-72b-instruct",
-            api_key=openrouter_key,
-            base_url="https://openrouter.ai/api/v1",
-        )
+    google_key = os.getenv("GOOGLE_AI_STUDIO_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
+    if google_key:
+        from browser_use import ChatGoogle
+        os.environ["GOOGLE_API_KEY"] = google_key
+        logger.info("Using Google Gemini as fallback LLM")
+        return ChatGoogle(model="gemini-2.0-flash")
 
     logger.warning("No fallback LLM configured")
     return None
