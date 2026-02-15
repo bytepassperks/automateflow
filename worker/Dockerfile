@@ -30,8 +30,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 RUN python -c "from browser_use import Browser; print('browser-use OK')"
-RUN playwright install chromium
-RUN playwright install-deps chromium
+RUN python -m playwright install chromium
+RUN python -m playwright install-deps chromium
 
 COPY . .
 
