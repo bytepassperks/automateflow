@@ -1,211 +1,120 @@
 import os
-import time
-import json
 import logging
-import base64
-from typing import Optional
-
 import httpx
 
 logger = logging.getLogger(__name__)
 
 
-class LLMProvider:
-    def __init__(self, name, api_key_env, rate_limit_per_min, supports_vision=False):
-        self.name = name
-        self.api_key = os.getenv(api_key_env, "")
-        self.rate_limit = rate_limit_per_min
-        self.supports_vision = supports_vision
-        self.request_timestamps = []
-        self.is_available = bool(self.api_key)
+def create_llm():
+    google_key = os.getenv("GOOGLE_AI_STUDIO_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
+    if google_key:
+        from browser_use import ChatGoogle
+        os.environ["GOOGLE_API_KEY"] = google_key
+        logger.info("Using Google Gemini (gemini-2.0-flash) as primary LLM")
+        return ChatGoogle(model="gemini-2.0-flash")
 
-    def can_make_request(self):
-        if not self.is_available:
-            return False
-        now = time.time()
-        self.request_timestamps = [t for t in self.request_timestamps if now - t < 60]
-        return len(self.request_timestamps) < self.rate_limit
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+    if openrouter_key:
+        from browser_use import ChatOpenAI
+        logger.info("Using OpenRouter (qwen/qwen2.5-vl-72b-instruct) as primary LLM")
+        return ChatOpenAI(
+            model="qwen/qwen2.5-vl-72b-instruct",
+            api_key=openrouter_key,
+            base_url="https://openrouter.ai/api/v1",
+        )
 
-    def record_request(self):
-        self.request_timestamps.append(time.time())
+    cerebras_key = os.getenv("CEREBRAS_API_KEY", "")
+    if cerebras_key:
+        from browser_use import ChatOpenAI
+        logger.info("Using Cerebras (llama-3.3-70b) as primary LLM")
+        return ChatOpenAI(
+            model="llama-3.3-70b",
+            api_key=cerebras_key,
+            base_url="https://api.cerebras.ai/v1",
+        )
 
-
-class GoogleAIProvider(LLMProvider):
-    def __init__(self):
-        super().__init__("google_ai_studio", "GOOGLE_AI_STUDIO_KEY", 15, supports_vision=True)
-        self.base_url = "https://generativelanguage.googleapis.com/v1beta"
-
-    async def generate(self, prompt: str, image_base64: Optional[str] = None) -> str:
-        model = "models/gemini-2.0-flash"
-        url = f"{self.base_url}/{model}:generateContent?key={self.api_key}"
-
-        parts = [{"text": prompt}]
-        if image_base64:
-            parts.append({
-                "inline_data": {
-                    "mime_type": "image/png",
-                    "data": image_base64,
-                }
-            })
-
-        payload = {"contents": [{"parts": parts}]}
-
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            candidates = data.get("candidates", [])
-            if candidates:
-                content = candidates[0].get("content", {})
-                parts = content.get("parts", [])
-                if parts:
-                    return parts[0].get("text", "")
-        return ""
+    raise ValueError("No LLM API key configured. Set GOOGLE_AI_STUDIO_KEY, OPENROUTER_API_KEY, or CEREBRAS_API_KEY.")
 
 
-class GroqProvider(LLMProvider):
-    def __init__(self):
-        super().__init__("groq", "GROQ_API_KEY", 30, supports_vision=False)
-        self.base_url = "https://api.groq.com/openai/v1"
+def create_fallback_llm():
+    cerebras_key = os.getenv("CEREBRAS_API_KEY", "")
+    if cerebras_key:
+        from browser_use import ChatOpenAI
+        logger.info("Using Cerebras as fallback LLM")
+        return ChatOpenAI(
+            model="llama-3.3-70b",
+            api_key=cerebras_key,
+            base_url="https://api.cerebras.ai/v1",
+        )
 
-    async def generate(self, prompt: str, image_base64: Optional[str] = None) -> str:
-        url = f"{self.base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": "llama-3.3-70b-versatile",
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 4096,
-        }
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+    if openrouter_key:
+        from browser_use import ChatOpenAI
+        logger.info("Using OpenRouter as fallback LLM")
+        return ChatOpenAI(
+            model="qwen/qwen2.5-72b-instruct",
+            api_key=openrouter_key,
+            base_url="https://openrouter.ai/api/v1",
+        )
 
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
-
-
-class CerebrasProvider(LLMProvider):
-    def __init__(self):
-        super().__init__("cerebras", "CEREBRAS_API_KEY", 30, supports_vision=False)
-        self.base_url = "https://api.cerebras.ai/v1"
-
-    async def generate(self, prompt: str, image_base64: Optional[str] = None) -> str:
-        url = f"{self.base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": "llama-3.3-70b",
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 4096,
-        }
-
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
+    logger.warning("No fallback LLM configured")
+    return None
 
 
-class OpenRouterProvider(LLMProvider):
-    def __init__(self):
-        super().__init__("openrouter", "OPENROUTER_API_KEY", 20, supports_vision=True)
-        self.base_url = "https://openrouter.ai/api/v1"
+class _ShimLLMRouter:
+    async def generate(self, prompt: str, image_base64: str | None = None, require_vision: bool = False) -> str:
+        # Prefer Google for vision
+        google_key = os.getenv("GOOGLE_AI_STUDIO_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
+        if require_vision and google_key:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={google_key}"
+            parts = [{"text": prompt}]
+            if image_base64:
+                parts.append({
+                    "inline_data": {
+                        "mime_type": "image/png",
+                        "data": image_base64,
+                    }
+                })
+            payload = {"contents": [{"parts": parts}]}
+            async with httpx.AsyncClient(timeout=60) as client:
+                r = await client.post(url, json=payload)
+                r.raise_for_status()
+                data = r.json()
+                cands = data.get("candidates", [])
+                if cands:
+                    content = cands[0].get("content", {})
+                    parts = content.get("parts", [])
+                    if parts:
+                        return parts[0].get("text", "")
+                return ""
 
-    async def generate(self, prompt: str, image_base64: Optional[str] = None) -> str:
-        url = f"{self.base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        # Try OpenRouter generic
+        or_key = os.getenv("OPENROUTER_API_KEY", "")
+        if or_key:
+            headers = {"Authorization": f"Bearer {or_key}", "Content-Type": "application/json"}
+            content = [{"type": "text", "text": prompt}]
+            model = "qwen/qwen2.5-vl-7b-instruct" if (require_vision or image_base64) else "qwen/qwen2.5-72b-instruct"
+            if image_base64:
+                content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}})
+            payload = {"model": model, "messages": [{"role": "user", "content": content}], "max_tokens": 1024}
+            async with httpx.AsyncClient(timeout=60) as client:
+                r = await client.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers)
+                r.raise_for_status()
+                data = r.json()
+                return data["choices"][0]["message"]["content"]
 
-        content = []
-        content.append({"type": "text", "text": prompt})
-        if image_base64:
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{image_base64}"},
-            })
+        # Fallback: Cerebras text
+        cerebras_key = os.getenv("CEREBRAS_API_KEY", "")
+        if cerebras_key:
+            headers = {"Authorization": f"Bearer {cerebras_key}", "Content-Type": "application/json"}
+            payload = {"model": "llama-3.3-70b", "messages": [{"role": "user", "content": prompt}], "max_tokens": 1024}
+            async with httpx.AsyncClient(timeout=60) as client:
+                r = await client.post("https://api.cerebras.ai/v1/chat/completions", json=payload, headers=headers)
+                r.raise_for_status()
+                data = r.json()
+                return data["choices"][0]["message"]["content"]
 
-        model = "qwen/qwen2.5-vl-7b-instruct" if image_base64 else "qwen/qwen2.5-72b-instruct"
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": content}],
-            "max_tokens": 4096,
-        }
-
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
-
-
-class HuggingFaceProvider(LLMProvider):
-    def __init__(self):
-        super().__init__("huggingface", "HF_API_TOKEN", 60, supports_vision=True)
-        self.base_url = "https://api-inference.huggingface.co/models"
-
-    async def generate(self, prompt: str, image_base64: Optional[str] = None) -> str:
-        model = "Qwen/Qwen2.5-VL-7B-Instruct"
-        url = f"{self.base_url}/{model}"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-
-        payload = {"inputs": prompt, "parameters": {"max_new_tokens": 4096}}
-
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-            if isinstance(data, list) and len(data) > 0:
-                return data[0].get("generated_text", "")
-            return str(data)
-
-
-class LLMRouter:
-    def __init__(self):
-        self.providers = [
-            GoogleAIProvider(),
-            GroqProvider(),
-            CerebrasProvider(),
-            OpenRouterProvider(),
-            HuggingFaceProvider(),
-        ]
-        self._retry_after = 0
-
-    async def generate(self, prompt: str, image_base64: Optional[str] = None, require_vision: bool = False) -> str:
-        if time.time() < self._retry_after:
-            wait_time = self._retry_after - time.time()
-            logger.info(f"All providers rate-limited, waiting {wait_time:.0f}s")
-            await self._async_sleep(wait_time)
-
-        for provider in self.providers:
-            if require_vision and not provider.supports_vision:
-                continue
-            if not provider.can_make_request():
-                continue
-
-            try:
-                logger.info(f"Using LLM provider: {provider.name}")
-                provider.record_request()
-                result = await provider.generate(prompt, image_base64)
-                if result:
-                    return result
-            except Exception as e:
-                logger.warning(f"Provider {provider.name} failed: {e}")
-                continue
-
-        logger.warning("All providers exhausted, queuing retry in 60s")
-        self._retry_after = time.time() + 60
-        raise Exception("All LLM providers are rate-limited or unavailable")
-
-    async def _async_sleep(self, seconds):
-        import asyncio
-        await asyncio.sleep(seconds)
+        raise RuntimeError("No LLM provider available for llm_router shim")
 
 
-llm_router = LLMRouter()
+llm_router = _ShimLLMRouter()
