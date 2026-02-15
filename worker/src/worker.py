@@ -160,7 +160,7 @@ async def run_browser_use_task(task_description: str, parameters: dict, job_id: 
         try:
             page = await agent_instance.browser_session.get_current_page()
             if page:
-                screenshot_bytes = await page.screenshot(full_page=False)
+                screenshot_bytes = await page.screenshot()
                 url = upload_screenshot(screenshot_bytes, job_id)
                 if url:
                     await callback_fn(screenshots=[url])
@@ -194,7 +194,7 @@ async def run_browser_use_task(task_description: str, parameters: dict, job_id: 
         final_url = history.urls()[-1] if history.urls() else ""
 
         try:
-            screenshot_bytes = await agent.browser_session.take_screenshot(full_page=False)
+            screenshot_bytes = await agent.browser_session.take_screenshot()
             if screenshot_bytes:
                 url = upload_screenshot(screenshot_bytes, job_id)
                 if url:
