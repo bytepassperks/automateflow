@@ -160,7 +160,15 @@ async def run_browser_use_task(task_description: str, parameters: dict, job_id: 
         if actions and len(actions) > 0:
             last_actions = actions[-1] if actions else []
             for act in last_actions:
-                action_desc += f" {type(act).__name__}"
+                if isinstance(act, str):
+                    clean = act.strip()[:40]
+                    action_desc += f" {clean}"
+                else:
+                    name = type(act).__name__
+                    if name == 'str':
+                        action_desc += f" {str(act)[:40]}"
+                    else:
+                        action_desc += f" {name}"
 
         log_msg = f"Step {step_num}"
         if thought:

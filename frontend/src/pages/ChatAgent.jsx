@@ -537,17 +537,30 @@ function ChatBubble({ message }) {
   }
 
   if (type === 'screenshot') {
+    const proxied = proxyScreenshotUrl(content);
     return (
       <div className="flex gap-3">
         <div className="w-7 shrink-0" />
-        <div className="max-w-md">
+        <div className="max-w-md w-full">
           <div className="rounded-xl overflow-hidden border border-gray-800 bg-black">
             <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 border-b border-gray-800">
               <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
               <span className="text-xs text-gray-500">Browser Screenshot</span>
             </div>
-              <a href={proxyScreenshotUrl(content)} target="_blank" rel="noopener noreferrer">
-                <img src={proxyScreenshotUrl(content)} alt="Browser screenshot" className="w-full" loading="lazy" />
+              <a href={proxied} target="_blank" rel="noopener noreferrer">
+                <img
+                  src={proxied}
+                  alt="Browser screenshot"
+                  className="w-full"
+                  loading="lazy"
+                  crossOrigin="anonymous"
+                  onError={(e) => {
+                    if (!e.target.dataset.retried) {
+                      e.target.dataset.retried = '1';
+                      e.target.src = proxied + '?t=' + Date.now();
+                    }
+                  }}
+                />
               </a>
           </div>
         </div>
