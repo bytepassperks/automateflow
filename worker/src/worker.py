@@ -4,7 +4,7 @@ import os
 import time
 import logging
 import signal
-import sys
+import base64
 
 from dotenv import load_dotenv
 
@@ -19,11 +19,8 @@ logger = logging.getLogger(__name__)
 import redis
 import httpx
 
-from .browser_manager import browser_manager
-from .llm_router import llm_router
-from .handoff import check_for_handoff
-from .utils.anti_detection import apply_stealth
-from .session_manager import save_session
+from .llm_router import create_llm, create_fallback_llm
+from .utils.storage import upload_screenshot
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:3000")
@@ -91,7 +88,7 @@ async def process_job(job_data: dict):
             module = __import__(f"src.{module_path}", fromlist=["run"])
             result = await module.run(parameters, job_id, callback_fn)
         elif task_description:
-            result = await run_custom_task(task_description, parameters, job_id, callback_fn)
+            result = await run_browser_use_task(task_description, parameters, job_id, callback_fn)
         else:
             raise ValueError("No template or task description provided")
 
@@ -117,139 +114,119 @@ async def process_job(job_data: dict):
         )
 
 
-async def run_custom_task(task_description: str, parameters: dict, job_id: str, callback_fn) -> dict:
-    context = await browser_manager.create_context(job_id)
-    page = await context.new_page()
-    await apply_stealth(page)
+async def run_browser_use_task(task_description: str, parameters: dict, job_id: str, callback_fn) -> dict:
+    from browser_use import Agent, Browser
 
-    screenshot_task = await browser_manager.run_with_screenshots(
-        page, job_id, callback_fn, interval=3.0
+    await callback_fn(logs=["Starting browser-use agent..."])
+
+    llm = create_llm()
+    fallback = create_fallback_llm()
+
+    browser = Browser(
+        headless=True,
+        args=[
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--window-size=1920,1080",
+        ],
     )
 
-    try:
-        await callback_fn(logs=["Starting custom task execution..."])
+    step_count = [0]
 
-        planning_prompt = f"""You are a browser automation agent. The user wants you to perform this task:
+    async def on_step_end(agent_instance):
+        step_count[0] += 1
+        step_num = step_count[0]
 
-Task: {task_description}
+        thought = ""
+        if hasattr(agent_instance.state, 'last_thought') and agent_instance.state.last_thought:
+            thought = agent_instance.state.last_thought[:200]
 
-Parameters: {json.dumps(parameters)}
+        actions = agent_instance.history.model_actions()
+        action_desc = ""
+        if actions and len(actions) > 0:
+            last_actions = actions[-1] if actions else []
+            for act in last_actions:
+                action_desc += f" {type(act).__name__}"
 
-Break this down into a list of browser actions. Each action should be one of:
-- goto: Navigate to a URL
-- click: Click an element (provide CSS selector)
-- type: Type text into an element (provide CSS selector and text)
-- wait: Wait for a specific time
-- extract: Extract data from the page
-
-Return a JSON array of action objects like:
-[
-  {{"action": "goto", "url": "https://example.com"}},
-  {{"action": "click", "selector": "#button"}},
-  {{"action": "type", "selector": "#input", "text": "hello"}},
-  {{"action": "wait", "seconds": 2}},
-  {{"action": "extract", "selector": "#result", "field": "text"}}
-]
-
-Only return the JSON array, no other text."""
-
-        plan_text = await llm_router.generate(planning_prompt)
+        log_msg = f"Step {step_num}"
+        if thought:
+            log_msg += f": {thought}"
+        if action_desc:
+            log_msg += f" | Actions:{action_desc}"
+        await callback_fn(logs=[log_msg])
 
         try:
-            start = plan_text.find("[")
-            end = plan_text.rfind("]") + 1
-            if start >= 0 and end > start:
-                actions = json.loads(plan_text[start:end])
-            else:
-                actions = [{"action": "goto", "url": task_description}]
-        except json.JSONDecodeError:
-            actions = [{"action": "goto", "url": "https://www.google.com"}]
+            page = await agent_instance.browser_session.get_current_page()
+            if page:
+                screenshot_bytes = await page.screenshot(full_page=False)
+                url = upload_screenshot(screenshot_bytes, job_id)
+                if url:
+                    await callback_fn(screenshots=[url])
+        except Exception as e:
+            logger.warning(f"Screenshot in hook failed: {e}")
 
-        await callback_fn(logs=[f"Plan created with {len(actions)} steps"])
-        results = {}
+    task = task_description
+    if parameters:
+        param_str = json.dumps(parameters, indent=2)
+        task = f"{task_description}\n\nAdditional parameters:\n{param_str}"
 
-        for i, action in enumerate(actions):
-            action_type = action.get("action", "")
-            await callback_fn(logs=[f"Step {i + 1}/{len(actions)}: {action_type}"])
+    agent = Agent(
+        task=task,
+        llm=llm,
+        fallback_llm=fallback,
+        browser=browser,
+        use_vision=True,
+        max_failures=3,
+        max_actions_per_step=4,
+    )
 
-            handoff_reason = await check_for_handoff(page)
-            if handoff_reason:
-                await callback_fn(
-                    logs=[f"Handoff required: {handoff_reason}"],
-                    handoff={"reason": handoff_reason},
-                )
-                await asyncio.sleep(300)
+    await callback_fn(logs=["Browser-use agent initialized with vision, executing task..."])
 
-            try:
-                if action_type == "goto":
-                    url = action.get("url", "")
-                    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                    await asyncio.sleep(2)
+    try:
+        history = await agent.run(
+            max_steps=30,
+            on_step_end=on_step_end,
+        )
 
-                elif action_type == "click":
-                    selector = action.get("selector", "")
-                    await page.click(selector, timeout=10000)
-                    await asyncio.sleep(1)
+        extracted = history.extracted_content()
+        final_url = history.urls()[-1] if history.urls() else ""
 
-                elif action_type == "type":
-                    selector = action.get("selector", "")
-                    text = action.get("text", "")
-                    await page.fill(selector, text)
-                    await asyncio.sleep(0.5)
+        try:
+            screenshot_bytes = await agent.browser_session.take_screenshot(full_page=False)
+            if screenshot_bytes:
+                url = upload_screenshot(screenshot_bytes, job_id)
+                if url:
+                    await callback_fn(screenshots=[url])
+        except Exception as e:
+            logger.warning(f"Final screenshot failed: {e}")
 
-                elif action_type == "wait":
-                    seconds = action.get("seconds", 2)
-                    await asyncio.sleep(min(seconds, 30))
+        await callback_fn(logs=["Browser-use agent completed task"])
 
-                elif action_type == "extract":
-                    selector = action.get("selector", "body")
-                    field = action.get("field", "text")
-                    try:
-                        element = await page.query_selector(selector)
-                        if element:
-                            if field == "text":
-                                value = await element.inner_text()
-                            elif field == "html":
-                                value = await element.inner_html()
-                            else:
-                                value = await element.get_attribute(field)
-                            results[f"step_{i + 1}"] = value
-                    except Exception as e:
-                        results[f"step_{i + 1}_error"] = str(e)
+        result_data = {
+            "extracted_content": extracted if extracted else [],
+            "final_url": final_url,
+            "steps_taken": step_count[0],
+        }
 
-                elif action_type == "press":
-                    key = action.get("key", "Enter")
-                    await page.keyboard.press(key)
-                    await asyncio.sleep(0.5)
+        thoughts = history.model_thoughts()
+        if thoughts:
+            result_data["agent_thoughts"] = [str(t)[:500] for t in thoughts[-3:]]
 
-            except Exception as e:
-                await callback_fn(logs=[f"Step {i + 1} error: {str(e)}"])
-                logger.warning(f"Action {action_type} failed: {e}")
-
-        await save_session(context, job_id)
-        await callback_fn(logs=["Custom task completed"])
-
-        if not results:
-            page_text = await page.inner_text("body")
-            results["pageText"] = page_text[:5000]
-
-        return results
+        return result_data
 
     finally:
-        screenshot_task.cancel()
         try:
-            await screenshot_task
-        except asyncio.CancelledError:
+            await browser.close()
+        except Exception:
             pass
-        await context.close()
 
 
 async def main():
-    logger.info("AutomateFlow Worker starting...")
+    logger.info("AutomateFlow Worker starting (browser-use powered)...")
     logger.info(f"Redis: {REDIS_URL}")
     logger.info(f"Backend: {BACKEND_URL}")
-
-    await browser_manager.start()
 
     redis_client = redis.from_url(REDIS_URL)
 
@@ -290,7 +267,6 @@ async def main():
                 await asyncio.sleep(1)
 
     finally:
-        await browser_manager.stop()
         redis_client.close()
         logger.info("Worker stopped")
 
