@@ -60,11 +60,19 @@ app.get('/api/screenshots/:key(*)', async (req, res) => {
     const key = req.params.key;
     const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key });
     const response = await s3Client.send(command);
-    const byteArray = await response.Body.transformToByteArray();
-    res.set('Content-Type', response.ContentType || 'image/png');
-    res.set('Content-Length', byteArray.length);
+    let byteArray = await response.Body.transformToByteArray();
+    let buf = Buffer.from(byteArray);
+    const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    if (!buf.subarray(0, 4).equals(pngHeader)) {
+      const str = buf.toString('utf-8');
+      if (/^[A-Za-z0-9+/=\r\n]+$/.test(str.trim())) {
+        buf = Buffer.from(str.trim(), 'base64');
+      }
+    }
+    res.set('Content-Type', 'image/png');
+    res.set('Content-Length', buf.length);
     res.set('Cache-Control', 'public, max-age=86400');
-    res.end(Buffer.from(byteArray));
+    res.end(buf);
   } catch (err) {
     console.error('Screenshot proxy error:', err.message);
     res.status(404).json({ error: 'Screenshot not found' });
