@@ -1,6 +1,7 @@
 import os
 import uuid
 import logging
+import base64
 
 import boto3
 from botocore.config import Config
@@ -28,10 +29,23 @@ def get_bucket():
     return os.getenv("IDRIVE_E2_BUCKET", "automateflow-files")
 
 
-def upload_screenshot(screenshot_bytes: bytes, job_id: str) -> str:
+def upload_screenshot(screenshot_bytes, job_id: str) -> str:
     client = get_s3_client()
     bucket = get_bucket()
     key = f"screenshots/{job_id}/{uuid.uuid4()}.png"
+
+    if isinstance(screenshot_bytes, str):
+        try:
+            screenshot_bytes = base64.b64decode(screenshot_bytes)
+        except Exception:
+            screenshot_bytes = screenshot_bytes.encode('utf-8')
+    elif isinstance(screenshot_bytes, bytes) and not screenshot_bytes[:4] == b'\x89PNG':
+        try:
+            decoded = base64.b64decode(screenshot_bytes)
+            if decoded[:4] == b'\x89PNG':
+                screenshot_bytes = decoded
+        except Exception:
+            pass
 
     client.put_object(
         Bucket=bucket,
