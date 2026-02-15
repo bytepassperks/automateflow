@@ -114,6 +114,18 @@ async def process_job(job_data: dict):
         )
 
 
+def _llm_supports_vision(llm) -> bool:
+    model_name = getattr(llm, "model_name", "") or getattr(llm, "model", "")
+    vision_models = ["gpt-4o", "gpt-4-vision", "gemini", "claude-3", "qwen2.5-vl", "qwen-vl"]
+    for vm in vision_models:
+        if vm in str(model_name).lower():
+            return True
+    base_url = str(getattr(llm, "openai_api_base", "") or getattr(llm, "base_url", "") or "")
+    if "cerebras" in base_url.lower():
+        return False
+    return False
+
+
 async def run_browser_use_task(task_description: str, parameters: dict, job_id: str, callback_fn) -> dict:
     from browser_use import Agent, Browser
 
@@ -172,17 +184,19 @@ async def run_browser_use_task(task_description: str, parameters: dict, job_id: 
         param_str = json.dumps(parameters, indent=2)
         task = f"{task_description}\n\nAdditional parameters:\n{param_str}"
 
+    use_vision = _llm_supports_vision(llm)
     agent = Agent(
         task=task,
         llm=llm,
         fallback_llm=fallback,
         browser=browser,
-        use_vision=True,
-        max_failures=3,
-        max_actions_per_step=4,
+        use_vision=use_vision,
+        max_failures=5,
+        max_actions_per_step=6,
     )
 
-    await callback_fn(logs=["Browser-use agent initialized with vision, executing task..."])
+    mode = "vision+DOM" if use_vision else "DOM-only"
+    await callback_fn(logs=[f"Browser-use agent initialized ({mode}), executing task..."])
 
     try:
         history = await agent.run(
