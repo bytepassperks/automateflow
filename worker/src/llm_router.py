@@ -6,6 +6,19 @@ logger = logging.getLogger(__name__)
 
 
 def create_llm():
+    cerebras_key = os.getenv("CEREBRAS_API_KEY", "")
+    if cerebras_key:
+        from browser_use import ChatOpenAI
+        logger.info("Using Cerebras (llama-3.3-70b) as primary LLM")
+        return ChatOpenAI(
+            model="llama-3.3-70b",
+            api_key=cerebras_key,
+            base_url="https://api.cerebras.ai/v1",
+            frequency_penalty=None,
+            add_schema_to_system_prompt=True,
+            dont_force_structured_output=True,
+        )
+
     openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
     if openrouter_key:
         from browser_use import ChatOpenAI
@@ -23,26 +36,32 @@ def create_llm():
         logger.info("Using Google Gemini (gemini-2.0-flash) as primary LLM")
         return ChatGoogle(model="gemini-2.0-flash")
 
-    raise ValueError("No LLM API key configured. Set OPENROUTER_API_KEY or GOOGLE_AI_STUDIO_KEY.")
+    raise ValueError("No LLM API key configured. Set CEREBRAS_API_KEY, OPENROUTER_API_KEY, or GOOGLE_AI_STUDIO_KEY.")
 
 
 def create_fallback_llm():
+    hf_key = os.getenv("HUGGINGFACE_API_KEY", "") or os.getenv("HF_TOKEN", "")
+    if hf_key:
+        from browser_use import ChatOpenAI
+        logger.info("Using HuggingFace (Qwen/Qwen2.5-72B-Instruct) as fallback LLM")
+        return ChatOpenAI(
+            model="Qwen/Qwen2.5-72B-Instruct",
+            api_key=hf_key,
+            base_url="https://router.huggingface.co/novita/v3/openai",
+            frequency_penalty=None,
+            add_schema_to_system_prompt=True,
+            dont_force_structured_output=True,
+        )
+
     openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
     if openrouter_key:
         from browser_use import ChatOpenAI
-        logger.info("Using OpenRouter (qwen/qwen2.5-vl-72b-instruct) as fallback LLM")
+        logger.info("Using OpenRouter (google/gemini-2.0-flash-001) as fallback LLM")
         return ChatOpenAI(
-            model="qwen/qwen2.5-vl-72b-instruct",
+            model="google/gemini-2.0-flash-001",
             api_key=openrouter_key,
             base_url="https://openrouter.ai/api/v1",
         )
-
-    google_key = os.getenv("GOOGLE_AI_STUDIO_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
-    if google_key:
-        from browser_use import ChatGoogle
-        os.environ["GOOGLE_API_KEY"] = google_key
-        logger.info("Using Google Gemini as fallback LLM")
-        return ChatGoogle(model="gemini-2.0-flash")
 
     logger.warning("No fallback LLM configured")
     return None
